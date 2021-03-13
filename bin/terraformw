@@ -1,0 +1,55 @@
+#!/bin/bash
+PROG=$(basename "$0")
+_dir=$(dirname "$0")
+
+_version='0.14.7'
+_download='https://releases.hashicorp.com/terraform/0.14.7/terraform_0.14.7_linux_amd64.zip'
+_bin_name='terraform_0.14.7_linux_amd64'
+if [[ -e "${_dir}/.terraformwrc" ]] ; then
+    . "${_dir}/.terraformwrc"
+    _version="$tf_version"
+    _download="$tf_download"
+    _bin_name="$tf_bin_name"
+fi
+
+if [[ -e "${_dir}/../.env" ]] ; then
+    . "${_dir}/../.env"
+fi
+
+_env="$1"
+shift
+if [[ "$_env" != "dev" && "$_env" != "stg" && "$_env" != "prd" ]] ; then
+    echo "$PROG first argument is dev or stg or prg."
+    exit 1
+fi
+
+if [[ ! -e "$_dir/$_bin_name" ]] ; then
+    echo "Download terraform ${_version}."
+    _tmpd=$(mktemp -d)
+    curl -L "$_download" -o tf.zip
+    unzip -j -d "$_tmpd" tf.zip terraform
+    mv "$_tmpd/terraform" "$_dir/$_bin_name"
+    rmdir "$_tmpd"
+    rm tf.zip
+fi
+
+_cmd="$1"
+shift
+pushd "$_dir/../terraform" > /dev/null
+    if [[ "$_cmd" == "import" || "$_cmd" == "plan" || "$_cmd" == "apply" || "$_cmd" == "destroy" ]] ; then
+        _opts=("$_cmd" -var-file="environment/${_env}.tfvars" ${@})
+    elif [[ "$_cmd" == "init" ]] ; then
+        _opts=("$_cmd" \
+            -backend-config="bucket=${BACKEND_BUCKET_NAME}" \
+            -backend-config="prefix=${_env}/var/terraform/state" \
+            ${@})
+    else
+        _opts=("$_cmd" ${@})
+    fi
+
+    GOOGLE_APPLICATION_CREDENTIALS="$GOOGLE_APPLICATION_CREDENTIALS" \
+        GCP_PROJECT="$GCP_PROJECT" \
+        GOOGLE_PROJECT="$GCP_PROJECT" \
+        TF_DATA_DIR=".terraform_${_env}" \
+        "../bin/$_bin_name" "${_opts[@]}"
+popd > /dev/null
